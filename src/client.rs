@@ -3,7 +3,7 @@ use crate::config::get_setting;
 use crate::dbg_msg;
 use crate::oauth::{force_refresh_token, token_daemon, Oauth, OauthBackendImpl};
 use crate::server::RequestExt;
-use crate::utils::{format_url, Post};
+use crate::utils::{fmt_size, format_url, Post};
 use arc_swap::ArcSwap;
 use bytes::Buf;
 use cached::proc_macro::cached;
@@ -17,6 +17,7 @@ use std::result::Result;
 use std::sync::atomic::Ordering;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicUsize};
 use std::sync::{Arc, LazyLock};
+use std::time::Instant;
 use wreq::cookie::Jar;
 use wreq::redirect::Policy;
 use wreq::{header as wreq_header, Client as WreqClient, Method, Response as WreqResponse};
@@ -250,6 +251,7 @@ pub async fn proxy(req: HyperRequest<Body>, format: &str) -> Result<HyperRespons
 	}
 
 	// First parameter is target URL (mandatory).
+	let log_url = url.clone();
 	let wreq_uri = wreq::Uri::try_from(url).map_err(|_| "Couldn't parse URL".to_string())?;
 
 	let mut builder = CLIENT.get(wreq_uri);
@@ -270,10 +272,22 @@ pub async fn proxy(req: HyperRequest<Body>, format: &str) -> Result<HyperRespons
 	// This is needed or Reddit will redirect us to a /media landing page that just renders the image.
 	builder = builder.header(wreq_header::ACCEPT, "*/*");
 
+	let started = Instant::now();
 	builder
 		.send()
 		.await
 		.map(|mut res| {
+			let status = res.status().as_u16();
+			let size = res
+				.headers()
+				.get(wreq_header::CONTENT_LENGTH)
+				.and_then(|v| v.to_str().ok())
+				.and_then(|v| v.parse::<u64>().ok());
+			trace!(
+				"net GET {log_url} → {status} in {}ms{}",
+				started.elapsed().as_millis(),
+				size.map(|s| format!( ", {}", fmt_size(s))).unwrap_or_default()
+			);
 			let headers = res.headers_mut();
 
 			let mut rm = |key: &str| headers.remove(key);
@@ -411,8 +425,20 @@ fn request(method: &'static Method, path: String, redirect: bool, quarantine: bo
 	}
 
 	async move {
+		let started = Instant::now();
 		match builder.send().await {
 			Ok(response) => {
+				let status = response.status().as_u16();
+				let size = response
+					.headers()
+					.get(wreq_header::CONTENT_LENGTH)
+					.and_then(|v| v.to_str().ok())
+					.and_then(|v| v.parse::<u64>().ok());
+				trace!(
+					"net {method} {url} → {status} in {}ms{}",
+					started.elapsed().as_millis(),
+					size.map(|s| format!( ", {}", fmt_size(s))).unwrap_or_default()
+				);
 				// Reddit may respond with a 3xx. Decide whether or not to
 				// redirect based on caller params.
 				if response.status().is_redirection() {
@@ -459,6 +485,7 @@ fn request(method: &'static Method, path: String, redirect: bool, quarantine: bo
 			}
 			Err(e) => {
 				dbg_msg!("{method} {REDDIT_URL_BASE}{path}: {}", e);
+				trace!("net {method} {url} → error in {}ms: {e}", started.elapsed().as_millis());
 
 				Err(e.to_string())
 			}
@@ -582,6 +609,7 @@ pub async fn json(path: String, quarantine: bool) -> Result<Value, String> {
 			match response.into_hyper_response().into_body().collect_bytes().await {
 				Ok(body) => {
 					let has_remaining = body.has_remaining();
+					trace!("net body {path} → {} B", body.len());
 
 					if !has_remaining {
 						// An empty body from the web host is not the OAuth

@@ -5,7 +5,11 @@ use crate::{
 use base64::{engine::general_purpose, Engine as _};
 use log::{error, info, trace, warn};
 use serde_json::json;
-use std::{collections::HashMap, sync::atomic::Ordering, time::Duration};
+use std::{
+	collections::HashMap,
+	sync::atomic::Ordering,
+	time::{Duration, Instant},
+};
 use tegen::tegen::TextGenerator;
 use tokio::time::{error::Elapsed, timeout};
 
@@ -241,7 +245,9 @@ impl OauthBackend for MobileSpoofAuth {
 		trace!("Sending token request to {url}...");
 
 		// Send request
+		let started = Instant::now();
 		let resp = builder.json(&json).send().await?;
+		trace!("net POST {url} → {} in {}ms", resp.status().as_u16(), started.elapsed().as_millis());
 
 		trace!("Received response with status {} and length {:?}", resp.status(), resp.headers().get("content-length"));
 		trace!("OAuth headers: {:#?}", resp.headers());
@@ -354,7 +360,9 @@ impl OauthBackend for GenericWebAuth {
 		trace!("Sending GenericWebAuth token request to {url}...");
 
 		// Send request
+		let started = Instant::now();
 		let resp: wreq::Response = builder.body(body_str).send().await?;
+		trace!("net POST {url} → {} in {}ms", resp.status().as_u16(), started.elapsed().as_millis());
 
 		trace!("Received response with status {} and length {:?}", resp.status(), resp.headers().get("content-length"));
 		trace!("GenericWebAuth headers: {:#?}", resp.headers());

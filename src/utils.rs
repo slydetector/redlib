@@ -1665,6 +1665,18 @@ pub fn to_absolute_url(relative_path: &str) -> String {
 	format!("{}{}", config::get_setting("REDLIB_FULL_URL").unwrap_or_default(), relative_path)
 }
 
+/// Formats a byte count for network log lines, e.g. `25.1 KiB`.
+pub fn fmt_size(n: u64) -> String {
+	const KB: f64 = 1024.0;
+	if n < 1024 {
+		format!("{n} B")
+	} else if n < 1024 * 1024 {
+		format!("{:.1} KiB", n as f64 / KB)
+	} else {
+		format!("{:.1} MiB", n as f64 / (KB * KB))
+	}
+}
+
 // =====================================================
 // RSS Feed Helpers
 // =====================================================

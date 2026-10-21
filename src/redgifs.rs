@@ -5,6 +5,9 @@ use std::sync::LazyLock;
 
 use crate::client::{proxy, CLIENT};
 use crate::server::RequestExt;
+use crate::utils::fmt_size;
+use log::trace;
+use std::time::Instant;
 
 // RedGifs token cache: (token, expiry_timestamp)
 static REDGIFS_TOKEN: LazyLock<std::sync::Mutex<(String, i64)>> = LazyLock::new(|| std::sync::Mutex::new((String::new(), 0)));
@@ -76,6 +79,10 @@ async fn get_json(url: &str, token: Option<&str>) -> Result<Value, String> {
 	if let Some(t) = token {
 		builder = builder.header("Authorization", format!("Bearer {t}"));
 	}
-	let body = builder.send().await.map_err(|e| e.to_string())?.bytes().await.map_err(|e| e.to_string())?;
+	let started = Instant::now();
+	let response = builder.send().await.map_err(|e| e.to_string())?;
+	let status = response.status().as_u16();
+	let body = response.bytes().await.map_err(|e| e.to_string())?;
+	trace!("net GET {url} → {status} in {}ms, {}", started.elapsed().as_millis(), fmt_size(body.len() as u64));
 	serde_json::from_slice(&body).map_err(|e| e.to_string())
 }

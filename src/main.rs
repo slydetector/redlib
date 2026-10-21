@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 
 use futures_lite::FutureExt;
 use hyper::{header::HeaderValue, Request, Response};
-use log::{info, warn};
+use log::{info, trace, warn};
 use redlib::body::Body;
 use redlib::client::{canonical_path, proxy, rate_limit_check, CLIENT};
 use redlib::server::{self, RequestExt};
@@ -505,8 +505,11 @@ async fn fetch_instances() -> Result<String, String> {
 }
 
 async fn fetch_text(url: &str) -> Result<String, String> {
+	let started = std::time::Instant::now();
 	let response = CLIENT.get(url).send().await.and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
-	response.text().await.map_err(|e| e.to_string())
+	let text = response.text().await.map_err(|e| e.to_string())?;
+	trace!("net GET {url} → 200 in {}ms, {}", started.elapsed().as_millis(), redlib::utils::fmt_size(text.len() as u64));
+	Ok(text)
 }
 
 fn proxied_text(body: Result<String, String>, content_type: &str) -> Response<Body> {
